@@ -1,0 +1,28 @@
+name: "String Quartet Constraints"
+description: "Four voices with strict counterpoint rigidity and tempo"
+params:
+  bpm: 90
+
+constraints:
+  - id: time
+    kind: tempo
+    config:
+      bpm: 90
+      grid: 16
+      drift: 0.005
+
+  - id: form
+    kind: laman
+    config:
+      num_nodes: 4
+      rigid: true
+
+  - id: tuning
+    kind: snap
+    config:
+      lattice: A2
+      epsilon: 0.05
+
+edges:
+  - from: tuning
+    to: form

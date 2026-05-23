@@ -1,0 +1,37 @@
+name: "Jazz Solo Constraints"
+description: "Bebop solo pipeline: lattice snap, funnel resolution, tempo grid"
+params:
+  key_root: 60
+  bpm: 180
+
+constraints:
+  - id: lattice
+    kind: snap
+    config:
+      lattice: A2
+      epsilon: 0.15
+
+  - id: phrase
+    kind: funnel
+    config:
+      target: 60
+      gravity: 0.7
+      decay: exponential
+
+  - id: timekeeper
+    kind: tempo
+    config:
+      bpm: 180
+      grid: 16
+      drift: 0.02
+
+  - id: structure
+    kind: laman
+    config:
+      num_nodes: 8
+      rigid: true
+
+edges:
+  - from: lattice
+    to: phrase
+    channel: point

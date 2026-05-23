@@ -1,0 +1,30 @@
+name: "Trap Beat Constraints"
+description: "Half-time grid with multi-agent consensus"
+params:
+  bpm: 140
+
+constraints:
+  - id: grid
+    kind: tempo
+    config:
+      bpm: 140
+      grid: 32
+      drift: 0.01
+
+  - id: ensemble
+    kind: consensus
+    config:
+      voices: 3
+      method: majority
+      threshold: 0.6
+
+  - id: rigidity
+    kind: laman
+    config:
+      num_nodes: 3
+      rigid: true
+
+edges:
+  - from: rigidity
+    to: ensemble
+    channel: edges
