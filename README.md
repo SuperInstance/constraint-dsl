@@ -1,214 +1,349 @@
 # constraint-dsl
 
-> YAML-based DSL for defining constraint pipelines — write music theory as data, not code
+> Declarative YAML language for building constraint pipelines in the SuperInstance ecosystem.
 
-Part of the [SuperInstance](https://github.com/SuperInstance) music constraint theory ecosystem. Provides a declarative YAML syntax for defining constraint satisfaction pipelines: you describe *what* musical constraints you want (no parallel fifths, swing rhythm, spectral density below 0.6) and the engine figures out *how* to satisfy them.
+`constraint-dsl` lets you define musical constraint graphs as YAML documents — specifying lattice snapping, funnel resolution, tempo grids, Laman rigidity, and multi-agent consensus — then compile and execute them as directed acyclic graphs. It's the glue between [constraint-theory-core](https://github.com/SuperInstance/constraint-toolkit) and higher-level SuperInstance components.
 
-## What It Does
+## How It Works
 
-Instead of writing procedural code to enforce musical rules, you write YAML documents that declare constraint pipelines. Each pipeline is a directed graph of **nodes** (constraint checks, transformations, generators) connected by **edges** (data flow). The DSL parser compiles these into executable pipelines that the [constraint-toolkit](https://github.com/SuperInstance/constraint-toolkit) engine solves.
+The pipeline has three stages:
 
-The DSL ships with example pipelines for common musical scenarios: `jazz_solo`, `trap_beat`, and `classical_quartet`. These demonstrate how to encode tradition-specific constraints as data — a core SuperInstance principle.
+1. **Parse** — YAML document → `Pipeline` object (nodes + edges)
+2. **Compile** — `Pipeline` → `ConstraintGraph` (typed executable nodes with cycle detection)
+3. **Execute** — `ConstraintGraph` → `RuntimeResult` (topological data-flow walk)
 
-## Key Features
+```
+YAML → Parser → Pipeline → Compiler → ConstraintGraph → Runtime → RuntimeResult
+```
 
-- **YAML syntax** — human-readable, diffable, version-controllable constraint definitions
-- **Pipeline graphs** — nodes + edges define data flow through constraint stages
-- **Built-in node types** — generators, filters, transformers, validators
-- **Example pipelines** — `jazz_solo`, `trap_beat`, `classical_quartet` included
-- **Parser + Compiler + Runtime** — full pipeline from YAML text to executable constraint solver
-- **Composable** — pipelines can import and extend other pipelines
+## DSL Syntax
+
+A DSL document is a YAML file with four top-level keys:
+
+```yaml
+name: "My Pipeline"
+description: "What it does"
+params:          # shared parameters (optional)
+  bpm: 120
+  key_root: 60
+
+constraints:     # list of constraint nodes
+  - id: my_snap
+    kind: snap
+    config:
+      lattice: A2
+      epsilon: 0.15
+
+  - id: my_tempo
+    kind: tempo
+    config:
+      bpm: 120
+      grid: 16
+
+edges:           # directed connections between nodes (optional)
+  - from: my_snap
+    to: my_tempo
+    channel: point     # optional: route specific output field
+    weight: 1.0        # optional: edge weight
+```
+
+### Constraint Node
+
+Each constraint has:
+
+| Field | Required | Description |
+|---|---|---|
+| `id` | ✅ | Unique identifier |
+| `kind` | ✅ | Constraint type (see below) |
+| `config` | ❌ | Type-specific configuration |
+| `inputs` | ❌ | Input port names |
+| `outputs` | ❌ | Output port names |
+
+### Edge
+
+| Field | Required | Description |
+|---|---|---|
+| `from` | ✅ | Source node ID |
+| `to` | ✅ | Target node ID |
+| `channel` | ❌ | Route a specific output field |
+| `weight` | ❌ | Edge weight (default 1.0) |
+
+## Constraint Kinds
+
+### `snap` — Lattice snapping
+
+Snaps 2D coordinates to a lattice (A2 by default) with configurable epsilon tolerance.
+
+```yaml
+- id: tuning
+  kind: snap
+  config:
+    lattice: A2
+    epsilon: 0.15
+```
+
+**Runtime output:** `point`, `error`, `safe`, `epsilon`, `lattice`
+
+### `funnel` — Temporal funnel resolution
+
+Applies a temporal agent that resolves values through phases (search → lock → deadband).
+
+```yaml
+- id: phrase
+  kind: funnel
+  config:
+    target: 60
+    gravity: 0.7
+    decay: exponential  # exponential | linear | slow
+```
+
+**Runtime output:** `phase`, `error`, `deadband`, `snapped_a`, `snapped_b`
+
+### `tempo` — Metronome / tempo grid
+
+Creates a metronome with configurable BPM, grid subdivision, and allowed drift.
+
+```yaml
+- id: timekeeper
+  kind: tempo
+  config:
+    bpm: 180
+    grid: 16
+    drift: 0.02
+```
+
+**Runtime output:** `phase`, `tick_count`, `converged`, `epsilon`, `anomaly_count`
+
+### `laman` — Rigidity constraints
+
+Builds a Laman rigidity graph (using Henneberg construction) to enforce structural constraints.
+
+```yaml
+- id: structure
+  kind: laman
+  config:
+    num_nodes: 8
+    rigid: true
+```
+
+**Runtime output:** `n`, `edges`, `rigid`, `is_rigid`
+
+### `consensus` — Multi-agent consensus
+
+Sets up a multi-agent metronome for ensemble synchronization with configurable voting method.
+
+```yaml
+- id: ensemble
+  kind: consensus
+  config:
+    voices: 3
+    method: majority
+    threshold: 0.6
+```
+
+**Runtime output:** `correction`, `converged`, `phase`, `epsilon`
+
+## Examples
+
+### Jazz Solo (Bebop)
+
+```yaml
+name: "Jazz Solo Constraints"
+description: "Bebop solo pipeline: lattice snap, funnel resolution, tempo grid"
+params:
+  key_root: 60
+  bpm: 180
+
+constraints:
+  - id: lattice
+    kind: snap
+    config:
+      lattice: A2
+      epsilon: 0.15
+
+  - id: phrase
+    kind: funnel
+    config:
+      target: 60
+      gravity: 0.7
+      decay: exponential
+
+  - id: timekeeper
+    kind: tempo
+    config:
+      bpm: 180
+      grid: 16
+      drift: 0.02
+
+  - id: structure
+    kind: laman
+    config:
+      num_nodes: 8
+      rigid: true
+
+edges:
+  - from: lattice
+    to: phrase
+    channel: point
+```
+
+### String Quartet (Classical)
+
+```yaml
+name: "String Quartet Constraints"
+params:
+  bpm: 90
+
+constraints:
+  - id: time
+    kind: tempo
+    config: { bpm: 90, grid: 16, drift: 0.005 }
+  - id: form
+    kind: laman
+    config: { num_nodes: 4, rigid: true }
+  - id: tuning
+    kind: snap
+    config: { lattice: A2, epsilon: 0.05 }
+
+edges:
+  - from: tuning
+    to: form
+```
+
+### Trap Beat (Half-time)
+
+```yaml
+name: "Trap Beat Constraints"
+params:
+  bpm: 140
+
+constraints:
+  - id: grid
+    kind: tempo
+    config: { bpm: 140, grid: 32, drift: 0.01 }
+  - id: ensemble
+    kind: consensus
+    config: { voices: 3, method: majority, threshold: 0.6 }
+  - id: rigidity
+    kind: laman
+    config: { num_nodes: 3, rigid: true }
+
+edges:
+  - from: rigidity
+    to: ensemble
+    channel: edges
+```
 
 ## Installation
 
 ```bash
-git clone https://github.com/SuperInstance/constraint-dsl.git
-cd constraint-dsl
-pip install -e ".[dev]"
+pip install constraint-dsl
 ```
 
-Requires Python 3.11+.
+Requires Python ≥ 3.10, PyYAML ≥ 6.0, and `constraint-theory-core`.
 
-## DSL Syntax Reference
+## Quick Start
 
-### Minimal Pipeline
+```python
+from constraint_dsl import load, compile_pipeline, Runtime
 
-```yaml
-name: my_pipeline
-version: "1.0"
+# Parse a DSL file
+pipeline = load("examples/jazz_solo.yaml")
 
-nodes:
-  generate:
-    type: generator
-    params:
-      dial: harmonic_tension
-      range: [0.2, 0.8]
+# Compile to executable graph
+graph = compile_pipeline(pipeline)
 
-  constrain:
-    type: filter
-    params:
-      rule: no_parallel_fifths
-      tolerance: 0.0
+# Execute with inputs
+runtime = Runtime(graph)
+result = runtime.execute({"x": 0.5, "y": 0.3, "t": 0.1})
 
-edges:
-  - [generate, constrain]
+# Access outputs
+print(result.outputs)           # leaf node outputs
+print(result.execution_order)   # topological order
+print(result.node_outputs)      # all node outputs
 ```
 
-### Jazz Solo Pipeline (excerpt)
-
-```yaml
-name: jazz_solo
-version: "1.0"
-
-nodes:
-  harmonic_seed:
-    type: generator
-    params:
-      dial: harmonic_tension
-      range: [0.5, 0.9]
-      tradition: jazz
-
-  rhythm_seed:
-    type: generator
-    params:
-      dial: rhythmic_complexity
-      range: [0.6, 0.85]
-      tradition: jazz
-
-  swing_filter:
-    type: transformer
-    params:
-      operation: apply_swing
-      ratio: 0.67    # Triplet swing
-
-  chord_quality:
-    type: filter
-    params:
-      rule: acceptable_voicing
-      allow: [maj7, min7, dom7, dim7, half_dim, alt]
-
-  spectral_gate:
-    type: filter
-    params:
-      dial: spectral_density
-      max: 0.7
-
-edges:
-  - [harmonic_seed, chord_quality]
-  - [rhythm_seed, swing_filter]
-  - [chord_quality, spectral_gate]
-  - [swing_filter, spectral_gate]
-```
-
-### Trap Beat Pipeline (excerpt)
-
-```yaml
-name: trap_beat
-version: "1.0"
-
-nodes:
-  hi_hat_pattern:
-    type: generator
-    params:
-      dial: rhythmic_complexity
-      range: [0.7, 0.95]
-      subdivision: 16
-
-  808_bass:
-    type: generator
-    params:
-      dial: spectral_density
-      range: [0.8, 1.0]
-      waveform: sine
-      saturation: high
-
-edges:
-  - [hi_hat_pattern, output]
-  - [808_bass, output]
-```
-
-### Node Types
-
-| Type | Purpose | Key Params |
-|---|---|---|
-| `generator` | Produce initial musical material | `dial`, `range`, `tradition` |
-| `filter` | Remove constraint violations | `rule`, `tolerance`, `allow`/`deny` |
-| `transformer` | Modify material | `operation`, params vary |
-| `validator` | Check final output passes constraints | `rules` list |
-| `output` | Terminal node — collects results | `format` |
-
-## Usage
-
-### Parse and run a pipeline
+### Parse from string
 
 ```python
 from constraint_dsl import parse, compile_pipeline, Runtime
 
-# Parse YAML into AST
-ast = parse("pipelines/jazz_solo.yaml")
+yaml_str = """
+name: "Simple"
+constraints:
+  - id: snap
+    kind: snap
+    config: { lattice: A2, epsilon: 0.1 }
+"""
 
-# Compile to executable pipeline
-pipeline = compile_pipeline(ast)
-
-# Run with the constraint toolkit engine
-runtime = Runtime()
-result = runtime.execute(pipeline)
-
-for solution in result.solutions:
-    print(solution)
+pipeline = parse(yaml_str)
+graph = compile_pipeline(pipeline)
+result = Runtime(graph).execute({"x": 1.5, "y": 2.3})
 ```
 
-### Programmatic pipeline construction
+### Register custom constraint kinds
 
 ```python
-from constraint_dsl import PipelineBuilder
+from constraint_dsl import register
 
-pipeline = (
-    PipelineBuilder("my_custom")
-    .add_node("gen", type="generator", params={"dial": "harmonic_tension", "range": [0.3, 0.7]})
-    .add_node("filter", type="filter", params={"rule": "no_parallel_fifths"})
-    .add_edge("gen", "filter")
-    .build()
-)
+@register("my_constraint")
+def compile_my_constraint(config, params):
+    return {"custom_data": config.get("value", 0)}
 ```
 
-## Architecture
+## API Reference
 
-```
-constraint_dsl/
-├── parser.py      # YAML → AST
-├── compiler.py    # AST → executable pipeline
-├── runtime.py     # Pipeline execution engine
-├── nodes.py       # Built-in node type implementations
-└── examples/
-    ├── jazz_solo.yaml
-    ├── trap_beat.yaml
-    └── classical_quartet.yaml
-```
+### Parser
 
-### Pipeline Lifecycle
+| Function | Description |
+|---|---|
+| `parse(text)` | Parse YAML string → `Pipeline` |
+| `load(path)` | Load YAML file → `Pipeline` |
 
-```
-YAML file → Parser → AST → Compiler → Pipeline → Runtime → Solutions
-```
+### Data Types
 
-## Testing
+| Type | Description |
+|---|---|
+| `Pipeline` | Parsed document: name, description, params, constraints, edges |
+| `ConstraintNode` | Node: id, kind, config, inputs, outputs |
+| `ConstraintEdge` | Edge: source, target, weight, channel |
 
-```bash
-pytest                            # Run all tests
-pytest tests/test_parser.py       # Parser tests
-pytest tests/test_compiler.py     # Compiler tests
-pytest tests/test_runtime.py      # Runtime execution tests
-pytest tests/test_examples.py     # Validate example pipelines
-```
+### Compiler
+
+| Function | Description |
+|---|---|
+| `compile_pipeline(pipeline)` | Compile → `ConstraintGraph` |
+| `register(kind)` | Decorator to register custom constraint kinds |
+
+### Runtime
+
+| Class | Description |
+|---|---|
+| `Runtime(graph)` | Executor for a compiled graph |
+| `.execute(inputs)` | Run graph → `RuntimeResult` |
+
+### Result
+
+| Field | Description |
+|---|---|
+| `RuntimeResult.outputs` | Leaf node outputs |
+| `RuntimeResult.node_outputs` | All node outputs |
+| `RuntimeResult.execution_order` | Topological execution order |
+
+### Errors
+
+| Exception | Stage |
+|---|---|
+| `ParseError` | YAML parsing / validation |
+| `CompileError` | Compilation / cycle detection |
+| `RuntimeError` | Graph execution |
 
 ## Related Repos
 
-- [**constraint-toolkit**](https://github.com/SuperInstance/constraint-toolkit) — Core constraint satisfaction engine that executes compiled pipelines
-- [**constraint-dialect**](https://github.com/SuperInstance/constraint-dialect) — Alternative DSL with different syntax tradeoffs
-- [**superinstance-live**](https://github.com/SuperInstance/superinstance-live) — Live controller that loads DSL pipelines
-- [**flux-genome**](https://github.com/SuperInstance/flux-genome) — Genetic evolution engine for generating constraint parameters
-- [**flux-hyperbolic**](https://github.com/SuperInstance/flux-hyperbolic) — Hyperbolic tradition embeddings used by tradition-aware nodes
+- **[constraint-toolkit](https://github.com/SuperInstance/constraint-toolkit)** — Core constraint theory library (lattice snap, Laman rigidity, metronome, funnel)
+- **[superinstance-live](https://github.com/SuperInstance/superinstance-live)** — Live session controller using DSL pipelines
+- **[plato-client](https://github.com/SuperInstance/plato-client)** — Client for the Plato optimization backend
+- **[flux-genome](https://github.com/SuperInstance/flux-genome)** — Genetic algorithm framework for evolving traditions
 
 ## License
 
